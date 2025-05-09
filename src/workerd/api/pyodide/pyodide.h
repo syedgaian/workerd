@@ -116,7 +116,6 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
-    bool usePackagesInArtifactBundler;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
     kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
     kj::Maybe<kj::Array<kj::String>> entrypointClasses;
@@ -132,7 +131,6 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        bool usePackagesInArtifactBundler,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
         kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
         kj::Maybe<kj::Array<kj::String>> entrypointClasses)
@@ -146,7 +144,6 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          usePackagesInArtifactBundler(usePackagesInArtifactBundler),
           memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
           entrypointClasses(kj::mv(entrypointClasses)) {}
@@ -202,10 +199,6 @@ class PyodideMetadataReader: public jsg::Object {
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
-  bool shouldUsePackagesInArtifactBundler() {
-    return state->usePackagesInArtifactBundler;
-  }
-
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
   }
@@ -234,6 +227,8 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::none;
   }
 
+  static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -248,7 +243,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
-    JSG_METHOD(shouldUsePackagesInArtifactBundler);
     JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
@@ -256,6 +250,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getDurableObjectClasses);
     JSG_METHOD(getEntrypointClasses);
+    JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -285,16 +280,21 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
  public:
-  struct State: public kj::Refcounted {
+  struct State {
     kj::Maybe<const PyodidePackageManager&> packageManager;
     // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
     // In other words:
     // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
+
+    // The storedSnapshot is only used while isValidating is true.
     kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
     // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
     // up cold starts.
     kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
+
+    // Set only when the validator is running. This is used to determine if it is appropriate
+    // to store a memory snapshot.
     bool isValidating;
 
     State(kj::Maybe<const PyodidePackageManager&> packageManager,
@@ -304,6 +304,12 @@ class ArtifactBundler: public jsg::Object {
           storedSnapshot(kj::none),
           existingSnapshot(kj::mv(existingSnapshot)),
           isValidating(isValidating) {};
+
+    kj::Own<State> clone() {
+      return kj::heap<State>(packageManager,
+          existingSnapshot.map(
+              [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+    }
   };
 
   ArtifactBundler(kj::Own<State> inner): inner(kj::mv(inner)) {};
@@ -335,12 +341,12 @@ class ArtifactBundler: public jsg::Object {
   }
 
   static kj::Own<State> makeDisabledBundler() {
-    return kj::refcounted<State>(kj::none, kj::none);
+    return kj::heap<State>(kj::none, kj::none);
   }
 
   // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
   static kj::Own<State> makePackagesOnlyBundler(kj::Maybe<const PyodidePackageManager&> manager) {
-    return kj::refcounted<State>(manager, kj::none);
+    return kj::heap<State>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -363,8 +369,6 @@ class ArtifactBundler: public jsg::Object {
     return kj::none;
   }
 
-  static kj::Array<kj::StringPtr> getSnapshotImports();
-
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -374,7 +378,6 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
-    JSG_STATIC_METHOD(getSnapshotImports);
   }
 
  private:

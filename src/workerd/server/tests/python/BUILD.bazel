@@ -44,7 +44,6 @@ py_wd_test("seek-metadatafs")
         pkg_skip_versions = {
             "0.27.5": [
                 "micropip",  # missing lockfile
-                "cryptography",  # top-level entropy
                 "soupsieve",  # Circular dependency with beautifulsoup4
                 "starlette",  # No module named 'starlette.converters'
                 # requests and dependencies have an ssl problem
@@ -82,3 +81,5 @@ py_wd_test(
 py_wd_test("js-import")
 
 py_wd_test("importable-env")
+
+py_wd_test("python-rpc")

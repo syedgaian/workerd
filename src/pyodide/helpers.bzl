@@ -1,7 +1,6 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
@@ -19,9 +18,6 @@ def _out_path(name, version):
     if version:
         res = version + "/" + res
     return res
-
-def _out(src, version):
-    return _out_path(_out_name(src), version)
 
 def _ts_bundle_out(prefix, name, version):
     return ":" + _out_path(prefix + name.removeprefix("internal/").replace("/", "_"), version)
@@ -135,12 +131,9 @@ def pyodide_static():
         [
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
             "types/*.ts",
             "types/*/*.ts",
         ],
-        allow_empty = True,
     )
     modules = ["python-entrypoint-helper.ts"]
 
@@ -175,40 +168,18 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 
     PRELUDE = """
-    import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:pool/builtin_wrappers";
-
-    // Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
-    // `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
-    // we want here, it doesn't make sense to load a package from a relative URL.
-    const location = undefined;
-
-    function addEventListener(){}
-
-    function reportUndefinedSymbolsPatched(Module) {
-        if (Module.API.version === "0.26.0a2") {
-            return;
-        }
-        Module.reportUndefinedSymbols(undefined);
-    }
-
-    if (typeof FinalizationRegistry === "undefined") {
-        globalThis.FinalizationRegistry = class FinalizationRegistry {
-            register(){}
-            unregister(){}
-        };
-    }
-
-    function patchDynlibLookup(Module, libName) {
-        try {
-            return Module.FS.readFile("/usr/lib/" + libName);
-        } catch(e) {
-            console.error("Failed to read ", libName, e);
-        }
-    }
-
-    function patchedApplyFunc(func, this_, args) {
-        return Function.prototype.apply.apply(func, [this_, args]);
-    }
+    import {
+        addEventListener,
+        getRandomValues,
+        location,
+        monotonicDateNow,
+        newWasmModule,
+        patchedApplyFunc,
+        patchDynlibLookup,
+        reportUndefinedSymbolsPatched,
+        wasmInstantiate,
+        patched_PyEM_CountFuncParams,
+    } from "pyodide-internal:pool/builtin_wrappers";
     """
 
     REPLACEMENTS = [
@@ -271,7 +242,15 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
         [
             "nullToUndefined(func.apply(",
-            "nullToUndefined(patchedApplyFunc(func, ",
+            "nullToUndefined(patchedApplyFunc(API, func, ",
+        ],
+        [
+            "nullToUndefined(Function.prototype.apply.apply",
+            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+        ],
+        [
+            "function _PyEM_CountFuncParams(func){",
+            "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
         ],
     ]
 
@@ -293,9 +272,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     else:
         esbuild(
             name = "emscriptenSetup@" + version,
+            # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+            # for it. The file is provided in entry_point instead.
             srcs = native.glob([
                 "internal/pool/*.ts",
-            ]) + [
+            ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
                 _out_path("pyodide.asm.js", version),
                 "internal/util.ts",
             ],

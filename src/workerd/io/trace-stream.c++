@@ -14,7 +14,7 @@ namespace {
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTACHMENT, "attachment")                                                                      \
-  V(ATTRIBUTE, "attribute")                                                                        \
+  V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
@@ -56,8 +56,8 @@ namespace {
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
-  V(OP, "op")                                                                                      \
   V(OUTCOME, "outcome")                                                                            \
+  V(PARENTSPANID, "parentSpanId")                                                                  \
   V(QUEUE, "queue")                                                                                \
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
@@ -122,6 +122,7 @@ class StringCache final {
 // these structs to be bidirectional. So, instead, let's just do the simple easy thing
 // and define a set of serializers to these types.
 
+// Serialize attribute value
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(str, kj::String) {
@@ -140,9 +141,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
   KJ_UNREACHABLE;
 }
 
+// Serialize attribute key:value(s) pair object
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTE_STR));
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
   if (attribute.value.size() == 1) {
@@ -156,10 +157,15 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
   return obj;
 }
 
+// Serialize "attributes" event
 jsg::JsValue ToJs(
     jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
-  return js.arr(
-      attributes, [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); });
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTES_STR));
+  obj.set(js, INFO_STR, js.arr(attributes, [&cache](jsg::Lock& js, const auto& attr) {
+    return ToJs(js, attr, cache);
+  }));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
@@ -429,9 +435,15 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
-  KJ_IF_SOME(op, spanOpen.operationName) {
-    obj.set(js, OP_STR, js.str(op));
+  obj.set(js, NAME_STR, js.str(spanOpen.operationName));
+
+  // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
+  if (isPredictableModeForTest()) {
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
+  } else {
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.parentSpanId)));
   }
+
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
@@ -556,27 +568,23 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
-    KJ_CASE_ONEOF(mark, tracing::Mark) {
-      KJ_SWITCH_ONEOF(mark) {
-        KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
-          obj.set(js, EVENT_STR, ToJs(js, de, cache));
-        }
-        KJ_CASE_ONEOF(ex, tracing::Exception) {
-          obj.set(js, EVENT_STR, ToJs(js, ex, cache));
-        }
-        KJ_CASE_ONEOF(log, tracing::Log) {
-          obj.set(js, EVENT_STR, ToJs(js, log, cache));
-        }
-        KJ_CASE_ONEOF(ret, tracing::Return) {
-          obj.set(js, EVENT_STR, ToJs(js, ret, cache));
-        }
-        KJ_CASE_ONEOF(link, tracing::Link) {
-          obj.set(js, EVENT_STR, ToJs(js, link, cache));
-        }
-        KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
-          obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
-        }
-      }
+    KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, de, cache));
+    }
+    KJ_CASE_ONEOF(ex, tracing::Exception) {
+      obj.set(js, EVENT_STR, ToJs(js, ex, cache));
+    }
+    KJ_CASE_ONEOF(log, tracing::Log) {
+      obj.set(js, EVENT_STR, ToJs(js, log, cache));
+    }
+    KJ_CASE_ONEOF(ret, tracing::Return) {
+      obj.set(js, EVENT_STR, ToJs(js, ret, cache));
+    }
+    KJ_CASE_ONEOF(link, tracing::Link) {
+      obj.set(js, EVENT_STR, ToJs(js, link, cache));
+    }
+    KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
+      obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
     }
   }
 
@@ -587,7 +595,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(_, tracing::Onset) {
-      return ONSET_STR;
+      KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
+      // return ONSET_STR;
     }
     KJ_CASE_ONEOF(_, tracing::Outcome) {
       return OUTCOME_STR;
@@ -601,27 +610,23 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
     KJ_CASE_ONEOF(_, tracing::SpanClose) {
       return SPANCLOSE_STR;
     }
-    KJ_CASE_ONEOF(mark, tracing::Mark) {
-      KJ_SWITCH_ONEOF(mark) {
-        KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
-          return DIAGNOSTICCHANNEL_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Exception) {
-          return EXCEPTION_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Log) {
-          return LOG_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Return) {
-          return RETURN_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Link) {
-          return LINK_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::CustomInfo) {
-          return ATTRIBUTE_STR;
-        }
-      }
+    KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
+      return DIAGNOSTICCHANNEL_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Exception) {
+      return EXCEPTION_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Log) {
+      return LOG_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Return) {
+      return RETURN_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Link) {
+      return LINK_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::CustomInfo) {
+      return ATTRIBUTES_STR;
     }
   }
   return kj::none;
@@ -752,12 +757,17 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-    v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, 2);
+    auto maybeCtx = KJ_ASSERT_NONNULL(handler->getCtx()).tryGetHandle(js);
+    v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);
     handlerArgs[1] = handler->env.getHandle(js);
+    KJ_IF_SOME(ctx, maybeCtx) {
+      handlerArgs[2] = ctx;
+    }
 
     try {
-      auto result = jsg::check(fn->Call(js.v8Context(), target, 2, handlerArgs.data()));
+      auto result =
+          jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
 
       // We need to be able to access the results builder from both the
       // success and failure branches of the promise we set up below.

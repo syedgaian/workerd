@@ -14,6 +14,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/async-context.h>
@@ -51,13 +52,13 @@ class InputGate;
 class OutputGate;
 
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
-typedef kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>
-    ExecutionContextOrState;
-typedef jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::Value env)>
-    EntrypointClass;
+using ExecutionContextOrState =
+    kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
+using EntrypointClass =
+    jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::Value env)>;
 
 // The type of a top-level export -- either a simple handler or a class.
-typedef kj::OneOf<EntrypointClass, api::ExportedHandler> NamedExport;
+using NamedExport = kj::OneOf<EntrypointClass, api::ExportedHandler>;
 
 struct EntrypointClasses {
   // Class constructor for WorkerEntrypoint.
@@ -169,7 +170,7 @@ class Worker: public kj::AtomicRefcounted {
   // This is useful for allowing generic client libraries to connect to private local services using
   // just a provided address (rather than requiring them to support being passed a binding to call
   // binding.connect() on).
-  typedef kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)> ConnectFn;
+  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
@@ -572,6 +573,9 @@ class Worker::Api {
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
+
+  // Return the virtual file system for this worker.
+  virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
