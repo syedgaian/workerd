@@ -1,0 +1,21 @@
+name: Sync Fork
+
+# Run daily at midnight and on manual trigger
+on:
+  schedule:
+    - cron: "0 0 * * *"    # every day at 00:00 UTC
+  workflow_dispatch:
+
+jobs:
+  sync-main:
+    runs-on: ubuntu-latest
+    steps:
+      # Use an action to fetch and merge upstream 'main' into our fork's 'main'
+      - name: Sync upstream changes
+        uses: dabreadman/sync-upstream-repo@v1.3.0
+        with:
+          # URL of the upstream repository (ensure this is the original repo you're forked from)
+          upstream_repo: "https://github.com/cloudflare/workerd.git"
+          upstream_branch: "main"           # branch on upstream to sync from
+          downstream_branch: "main"         # branch on fork to sync to (our main)
+          token: ${{ secrets.SYNC_TOKEN }}  # GitHub token with push access to the fork
