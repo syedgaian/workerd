@@ -21,17 +21,16 @@ import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 import { reportError } from 'pyodide-internal:util';
 
 // Function to import JavaScript modules from Python
-let doAnImport: (mod: string) => Promise<any>;
-let cloudflareWorkersModule: any;
-let cloudflareSocketsModule: any;
+const pyodide_entrypoint_helper: any = {};
+
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
   cloudflareWorkers: any,
   cloudflareSockets: any
 ): void {
-  doAnImport = func;
-  cloudflareWorkersModule = cloudflareWorkers;
-  cloudflareSocketsModule = cloudflareSockets;
+  pyodide_entrypoint_helper.doAnImport = func;
+  pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
+  pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
@@ -99,12 +98,10 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     const sitePackages = pyodide.FS.sitePackages;
 
     // Expose the doAnImport function and global modules to Python globals
-    // @ts-expect-error: Assign to global object
-    globalThis.pyodide_entrypoint_helper = {
-      doAnImport,
-      cloudflareWorkersModule,
-      cloudflareSocketsModule,
-    };
+    pyodide.registerJsModule(
+      '_pyodide_entrypoint_helper',
+      pyodide_entrypoint_helper
+    );
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     //
@@ -232,28 +229,53 @@ async function initPyInstance(
   return res as PyModule;
 }
 
+// https://developers.cloudflare.com/workers/runtime-apis/rpc/reserved-methods/
+const SPECIAL_HANDLER_NAMES = ['fetch', 'connect'];
+const SPECIAL_DO_HANDLER_NAMES = [
+  'alarm',
+  'webSocketMessage',
+  'webSocketClose',
+  'webSocketError',
+];
+
 function makeEntrypointProxyHandler(
-  pyInstancePromise: Promise<PyModule>
+  pyInstancePromise: Promise<PyModule>,
+  isDurableObject: boolean
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
-      const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
-      if (isKnownHandler) {
+      const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
+      const isKnownDoHandler =
+        isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
+      const isFetch = prop == 'fetch';
+      if (isKnownHandler || isKnownDoHandler) {
         prop = 'on_' + prop;
       }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        if (typeof pyInstance[prop] === 'function') {
-          return await doPyCallHelper(isKnownHandler, pyInstance[prop], args);
-        } else {
+        if (typeof pyInstance[prop] !== 'function') {
           throw new TypeError(`Method ${prop} does not exist`);
         }
+
+        if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
+          return await doPyCallHelper(true, pyInstance[prop], args);
+        }
+
+        const introspectionMod = await getIntrospectionMod(await getPyodide());
+
+        return await doPyCall(introspectionMod.wrapper_func, [
+          isFetch,
+          pyInstance,
+          prop,
+          ...args,
+        ]);
       };
     },
   };
@@ -264,6 +286,7 @@ function makeEntrypointClass(
   classKind: AnyClass,
   methods: string[]
 ): any {
+  const isDurableObject = classKind.name === 'DurableObject';
   const result = class EntrypointWrapper extends classKind {
     public constructor(...args: any[]) {
       super(...args);
@@ -271,7 +294,10 @@ function makeEntrypointClass(
       const pyInstancePromise = initPyInstance(className, args);
       // We do not know the methods that are defined on the RPC class, so we need a proxy to
       // support any possible method name.
-      return new Proxy(this, makeEntrypointProxyHandler(pyInstancePromise));
+      return new Proxy(
+        this,
+        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject)
+      );
     }
   };
 
@@ -290,9 +316,11 @@ function makeEntrypointClass(
 type IntrospectionMod = {
   __dict__: PyDict;
   collect_entrypoint_classes: (mod: PyModule) => typeof pythonEntrypointClasses;
+  wrapper_func: PyCallable;
 };
 
-async function getIntrospectionMod(
+let introspectionModPromise: Promise<IntrospectionMod> | null = null;
+async function loadIntrospectionMod(
   pyodide: Pyodide
 ): Promise<IntrospectionMod> {
   const introspectionSource = await import('pyodide-internal:introspection.py');
@@ -302,8 +330,20 @@ async function getIntrospectionMod(
   const decoder = new TextDecoder();
   pyodide.runPython(decoder.decode(introspectionSource.default), {
     globals: introspectionMod.__dict__,
+    filename: 'introspection.py',
   });
+
   return introspectionMod;
+}
+
+async function getIntrospectionMod(
+  pyodide: Pyodide
+): Promise<IntrospectionMod> {
+  if (introspectionModPromise === null) {
+    introspectionModPromise = loadIntrospectionMod(pyodide);
+  }
+
+  return introspectionModPromise;
 }
 
 const SUPPORTED_HANDLER_NAMES = [
