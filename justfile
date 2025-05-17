@@ -86,8 +86,16 @@ clippy package="...":
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-18 libc++1-18 libc++-18-dev lld-18 bazelisk python3
 
+generate-types:
+  bazel build //types:types
+  cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
+  cp -r bazel-bin/types/definitions/experimental types/generated-snapshot/
+
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
 @_rust-analyzer:
   rm -rf ./rust-project.json
   # rust-analyzer doesn't like stderr output, redirect it to /dev/null
   bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null
+
+create-external:
+  tools/unix/create-external.sh
