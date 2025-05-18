@@ -2226,7 +2226,9 @@ class JsRef;
   V(Split)                                                                                         \
   V(ToPrimitive)                                                                                   \
   V(ToStringTag)                                                                                   \
-  V(Unscopables)
+  V(Unscopables)                                                                                   \
+  V(Dispose)                                                                                       \
+  V(AsyncDispose)
 
 class JsValue;
 class JsMessage;
@@ -2249,6 +2251,12 @@ class JsMessage;
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
+#undef V
+
+#define V(Name) || kj::isSameType<T, Js##Name>()
+template <typename T>
+concept IsJsValue =
+    kj::isSameType<T, JsValue>() || kj::isSameType<T, JsMessage>() JS_TYPE_CLASSES(V);
 #undef V
 
 class DOMException;
@@ -2411,6 +2419,12 @@ class Lock {
   // don't provide any further context. Most code should rely on the caller passing in a `Lock&`.
   static Lock& from(v8::Isolate* v8Isolate) {
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(SET_DATA_LOCK));
+  }
+
+  // TODO(someday): A clang-tidy rule to enforce use of Lock::current over
+  // v8::Isolate::GetCurrent would be helpful.
+  static Lock& current() {
+    return from(v8::Isolate::GetCurrent());
   }
 
   // RAII construct that reports amount of external memory to be manually attributed to
@@ -2691,7 +2705,11 @@ class Lock {
   // value is properly handled.
   auto withinHandleScope(auto&& fn) {
     using Ret = decltype(fn());
-    if constexpr (isV8Local<Ret>()) {
+    if constexpr (IsJsValue<Ret>) {
+      v8::EscapableHandleScope scope(v8Isolate);
+      v8::Local<v8::Value> value = fn();
+      return Ret(scope.Escape(value));
+    } else if constexpr (isV8Local<Ret>()) {
       v8::EscapableHandleScope scope(v8Isolate);
       return scope.Escape(fn());
     } else if constexpr (isV8MaybeLocal<Ret>()) {
@@ -2800,8 +2818,6 @@ class Lock {
 #define V(Name) JsSymbol symbol##Name() KJ_WARN_UNUSED_RESULT;
   JS_V8_SYMBOLS(V)
 #undef V
-  JsSymbol symbolDispose() KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbolAsyncDispose() KJ_WARN_UNUSED_RESULT;
 
   void runMicrotasks();
   void terminateExecution();
