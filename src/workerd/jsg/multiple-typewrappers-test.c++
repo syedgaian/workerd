@@ -137,11 +137,11 @@ void expectEval(
 }
 
 KJ_TEST("Create a context with a configuration then create a default context with another") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   capnp::MallocMessageBuilder flagsArena;
   auto flags = flagsArena.initRoot<::workerd::CompatibilityFlags>();
   auto flagsReader = flags.asReader();
-  TestIsolate isolate(v8System, Configuration(flagsReader), kj::heap<IsolateObserver>(), {}, false);
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), Configuration(flagsReader),
+      kj::heap<IsolateObserver>(), {}, false);
   isolate.runInLockScope([&](TestIsolate::Lock& lock) {
     jsg::JsContext<TestContext> context =
         lock.newContextWithConfiguration<TestContext>(Configuration(flagsReader), {});

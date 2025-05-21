@@ -24,16 +24,16 @@ void preamble(auto callback) {
 }
 
 v8::Local<v8::Value> toBytes(jsg::Lock& js, kj::String str) {
-  return jsg::BackingStore::from(str.asBytes().attach(kj::mv(str))).createHandle(js);
+  return jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js);
 }
 
 jsg::BufferSource toBufferSource(jsg::Lock& js, kj::String str) {
-  auto backing = jsg::BackingStore::from(str.asBytes().attach(kj::mv(str))).createHandle(js);
+  auto backing = jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js);
   return jsg::BufferSource(js, kj::mv(backing));
 }
 
 jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
-  auto backing = jsg::BackingStore::from(kj::mv(bytes)).createHandle(js);
+  auto backing = jsg::BackingStore::from(js, kj::mv(bytes)).createHandle(js);
   return jsg::BufferSource(js, kj::mv(backing));
 }
 
@@ -41,7 +41,6 @@ jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
 // Happy Cases
 
 KJ_TEST("ReadableStream read all text (value readable)") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   preamble([](jsg::Lock& js) {
     uint checked = 0;
     auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());

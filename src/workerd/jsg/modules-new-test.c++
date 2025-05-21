@@ -110,7 +110,7 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
-  TestIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());                                 \
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
   runInV8Stack([&](auto& stackScope) {                                                             \
     TestIsolate::Lock lock(isolate, stackScope);                                                   \
     lock.withinHandleScope([&] {                                                                   \
@@ -752,8 +752,6 @@ KJ_TEST("Bundle shadows built-in") {
 // ======================================================================================
 
 KJ_TEST("Attaching a module registry works") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
-
   PREAMBLE(([&](Lock& js) {
     ResolveObserver resolveObserver;
     CompilationObserver compilationObserver;

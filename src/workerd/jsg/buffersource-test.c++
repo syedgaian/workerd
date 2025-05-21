@@ -48,7 +48,7 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
   }
 
   BufferSource makeBufferSource(jsg::Lock& js) {
-    return BufferSource(js, BackingStore::from(kj::arr<kj::byte>(1, 2, 3)));
+    return BufferSource(js, BackingStore::from(js, kj::arr<kj::byte>(1, 2, 3)));
   }
 
   BufferSource makeArrayBuffer(jsg::Lock& js) {
@@ -65,7 +65,6 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
 
 KJ_TEST("BufferSource works") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
 
   // By default, a BufferSource handle is created as a DataView
