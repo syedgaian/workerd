@@ -16,17 +16,36 @@
 #include <v8-local-handle.h>
 #include <v8-value.h>
 
+#include <kj/async.h>
 #include <kj/common.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 
+class ByteString;
+class DOMString;
 class Lock;
+class USVString;
+
+// Update this list whenever a new string type is added.
+// TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
+template <typename T>
+concept StringLike =
+    kj::isSameType<kj::String, T>() || kj::isSameType<kj::ArrayPtr<const char>, T>() ||
+    kj::isSameType<kj::Array<const char>, T>() || kj::isSameType<ByteString, T>() ||
+    kj::isSameType<USVString, T>() || kj::isSameType<DOMString, T>();
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo = false;
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo<v8::FunctionCallbackInfo<T>> = true;
+
+template <typename T>
+constexpr bool isKjPromise = false;
+
+template <typename T>
+constexpr bool isKjPromise<kj::Promise<T>> = true;
 
 // These types are passed by fast api as is and do not require wrapping/unwrapping.
 template <typename T>
@@ -36,7 +55,8 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
 
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename T>
-concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>>;
+concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>> &&
+    !isKjPromise<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>
@@ -75,9 +95,13 @@ constexpr bool isFastApiCompatible<Ret(jsg::Lock&, Args...)> = FastApiMethod<Ret
 
 template <typename T>
 struct FastApiJSGToV8 {
-  // We allow every type to be passed into v8 fast api using v8::Local<v8::Value>
-  // conversion.
   using value = v8::Local<v8::Value>;
+};
+
+template <typename T>
+  requires StringLike<kj::RemoveConst<kj::Decay<T>>>
+struct FastApiJSGToV8<T> {
+  using value = const v8::FastOneByteString&;
 };
 
 template <typename T>
