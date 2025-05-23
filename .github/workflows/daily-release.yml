@@ -3,7 +3,7 @@ name: Daily Release
 on:
   schedule:
     # Run at 00:30 UTC every day
-    - cron: '30 0 * * *'
+    # - cron: '30 0 * * *'
   # Allow manual triggering for testing
   workflow_dispatch:
 
