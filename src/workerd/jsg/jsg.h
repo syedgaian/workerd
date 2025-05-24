@@ -2779,7 +2779,8 @@ class Lock {
   BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
-  // as opposed to the default Uint8Array.
+  // as opposed to the default Uint8Array.  May copy and move the bytes if they are
+  // not in the right sandbox.
   BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   enum RegExpFlags {
@@ -2820,7 +2821,16 @@ class Lock {
 #undef V
 
   void runMicrotasks();
-  void terminateExecution();
+
+  // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
+  // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
+  // some code will actually execute before termination kicks in.)
+  void terminateNextExecution();
+
+  // Terminates exution immediately, forcing V8 to see the flag and react to it before returning.
+  // Always throws JsExceptionThrown.
+  [[noreturn]] void terminateExecutionNow();
+
   bool pumpMsgLoop();
 
   // Logs and reports the error to tail workers (if called within an request),

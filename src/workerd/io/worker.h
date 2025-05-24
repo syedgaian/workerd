@@ -47,6 +47,7 @@ class WebSocketRequestResponsePair;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
+struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
@@ -309,16 +310,34 @@ class Worker::Script: public kj::AtomicRefcounted {
     // the Script constructor returns.
     kj::StringPtr mainScriptName;
 
-    // Callback which will compile the script-level globals, returning a list of them.
-    // TODO(cleanup): Arguably we should replace this with an intermediate representation like
-    //   `Array<Module>`, but appropriate for bundled globals in Service Workers syntax. Actually,
-    //   `Array<Module>` might be a perfectly fine representation! The names would just represent
-    //   global variable names instead of import names. But I'm punting for now as I dont' have an
-    //   immediate need for this cleanup. (ModuleSoruce previously featured a callback like this as
-    //   well, but was cleaned up to use an intermediate representation instead.)
-    kj::Function<kj::Array<CompiledGlobal>(
-        jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
-        compileGlobals;
+    // Global variables to inject at startup.
+    //
+    // This is sort of weird and historical. Under the old Service Workers syntax, the entire
+    // Worker is one JavaScript file, so there are no "modules" in the normal sense. However,
+    // there were various extra blobs of data we wanted to distribute with the code: Wasm modules,
+    // as well as large text and data blobs (e.g. embedded asset files). We decided at the time
+    // that these made sense as types of bindings. But in fact they don't fit well in the bindings
+    // abstraction: most bindings are used as configuration, but these are whole files, too big
+    // to be treated like configuration. We ended up creating a mechanism to separate out these
+    // binding types and distribute them with the code rather than the config. We also need them
+    // to be delivered to the `Worker::Script` constructor rather than the `Worker` constructor
+    // (long story).
+    //
+    // When ES modules arrived, it suddenly made sense to just say that these are modules, not
+    // bindings. But of course, we have to keep supporting Service Workers syntax forever.
+    //
+    // Recall that in Service Workers syntax, bindings show up as global variables.
+    //
+    // So, this array contains the set of Service Worker bindings that are module-like (text, data,
+    // or Wasm blobs), which should be injected into the global scope. We reuse the `Module` type
+    // for this because it is convenient, but note that only a subset of types are actually
+    // supported as globals. In this array, the `name` of each `Module` is the global variable
+    // name.
+    kj::Array<Module> globals;
+
+    // The worker may have a bundle of capnp schemas attached. (In Service Workers syntax, these
+    // can't be referenced directly by the app, but they may be used by bindings.)
+    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
   };
 
   // Representation of source code for a worker using ES Modules syntax.
@@ -625,6 +644,10 @@ class Worker::Api {
       const Worker::Isolate& isolate,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const = 0;
 
+  virtual kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
+      const Script::ScriptSource& source,
+      const Worker::Isolate& isolate) const = 0;
+
   // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
@@ -678,6 +701,10 @@ class Worker::Api {
 
   // Return the virtual file system for this worker.
   virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
+
+  virtual kj::Maybe<const api::pyodide::EmscriptenRuntime&> getEmscriptenRuntime() const {
+    return kj::none;
+  }
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
