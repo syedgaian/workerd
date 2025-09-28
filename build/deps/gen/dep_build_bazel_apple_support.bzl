@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "1.22.0"
-URL = "https://github.com/bazelbuild/apple_support/releases/download/1.22.0/apple_support.1.22.0.tar.gz"
+TAG_NAME = "1.23.1"
+URL = "https://github.com/bazelbuild/apple_support/releases/download/1.23.1/apple_support.1.23.1.tar.gz"
 STRIP_PREFIX = "./"
-SHA256 = "b265beacfa477081caaf2bd05978ee7d11fdb8c202a1b76d0ef28d901d1e7b33"
+SHA256 = "ee20cc5c0bab47065473c8033d462374dd38d172406ecc8de5c8f08487943f2f"
 TYPE = "tgz"
 
 def dep_build_bazel_apple_support():
