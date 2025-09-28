@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "1.7.1"
-URL = "https://github.com/bazelbuild/bazel-skylib/releases/download/1.7.1/bazel-skylib-1.7.1.tar.gz"
+TAG_NAME = "1.8.2"
+URL = "https://github.com/bazelbuild/bazel-skylib/releases/download/1.8.2/bazel-skylib-1.8.2.tar.gz"
 STRIP_PREFIX = ""
-SHA256 = "bc283cdfcd526a52c3201279cda4bc298652efa898b10b4db0837dc51652756f"
+SHA256 = "6e78f0e57de26801f6f564fa7c4a48dc8b36873e416257a92bbb0937eeac8446"
 TYPE = "tgz"
 
 def dep_bazel_skylib():

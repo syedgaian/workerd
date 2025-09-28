@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.11.10"
-URL = "https://github.com/astral-sh/ruff/releases/download/0.11.10/ruff-aarch64-unknown-linux-gnu.tar.gz"
+TAG_NAME = "0.13.2"
+URL = "https://github.com/astral-sh/ruff/releases/download/0.13.2/ruff-aarch64-unknown-linux-gnu.tar.gz"
 STRIP_PREFIX = "ruff-aarch64-unknown-linux-gnu"
-SHA256 = "a39ff81bfe023d55008943f11221d49759d73b9fe6bf76584626cfcdd33d8684"
+SHA256 = "6aabf5f6d12d981d5b6d0759b118bd52ad4de77695f573c96d74de78fb2b1820"
 TYPE = "tgz"
 
 def dep_ruff_linux_arm64():

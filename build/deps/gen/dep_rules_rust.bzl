@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.61.0"
-URL = "https://github.com/bazelbuild/rules_rust/releases/download/0.61.0/rules_rust-0.61.0.tar.gz"
+TAG_NAME = "0.65.0"
+URL = "https://github.com/bazelbuild/rules_rust/releases/download/0.65.0/rules_rust-0.65.0.tar.gz"
 STRIP_PREFIX = ""
-SHA256 = "53c1bac7ec48f7ce48c4c1c6aa006f27515add2aeb05725937224e6e00ec7cea"
+SHA256 = "62b9c7fdff230a912a18053e91e36a6ae73e41275ef5e82d7055ea3ed26e79ee"
 TYPE = "tgz"
 
 def dep_rules_rust():
